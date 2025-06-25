@@ -2,78 +2,77 @@
 
 echo "Welcome to the User Creation Script"
 
-# 1. if-else: Check if script is run as root
+# Check if script is run as root
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root."
   exit 1
-else
-  echo "Running as root."
 fi
 
-# 2. while loop: Prompt until a valid username is given
-while true; do
-  read -p "Enter the username to create: " USERNAME
-  if grep -q "^$USERNAME:" /etc/passwd; then
-    echo "User '$USERNAME' already exists. Try another."
-  else
-    break
-  fi
-done
+# Prompt for username
+read -p "Enter the username to create: " USERNAME
+if grep -q "^$USERNAME:" /etc/passwd; then
+  echo "User '$USERNAME' already exists."
+  exit 1
+fi
 
-# 3. if-elif-else: Ask for home directory
+# Ask for custom home directory with validation
 read -p "Do you want a custom home directory? (yes/no): " answer
 if [[ "$answer" == "yes" ]]; then
   read -p "Enter custom home path: " HOMEDIR
-  CREATE_CMD="useradd -m -d $HOMEDIR $USERNAME"
+  HOME_FLAG="-d $HOMEDIR"
 elif [[ "$answer" == "no" ]]; then
-  CREATE_CMD="useradd -m $USERNAME"
+  HOME_FLAG=""
 else
-  echo "Invalid choice. Using default home directory."
-  CREATE_CMD="useradd -m $USERNAME"
+  echo "Invalid input. Expected 'yes' or 'no'. Exiting."
+  exit 1
 fi
 
-# 4. case: Choose default shell
+# Prompt to select shell with validation
 echo "Choose shell:"
 echo "1) /bin/bash"
 echo "2) /bin/sh"
 echo "3) /sbin/nologin"
 read -p "Enter choice (1/2/3): " shell_choice
 
-case $shell_choice in
-  1) SHELL="/bin/bash" ;;
-  2) SHELL="/bin/sh" ;;
-  3) SHELL="/sbin/nologin" ;;
-  *) SHELL="/bin/bash" ;;
-esac
+if [[ "$shell_choice" == "1" ]]; then
+  SHELL="/bin/bash"
+elif [[ "$shell_choice" == "2" ]]; then
+  SHELL="/bin/sh"
+elif [[ "$shell_choice" == "3" ]]; then
+  SHELL="/sbin/nologin"
+else
+  echo "Invalid choice. Exiting."
+  exit 1
+fi
 
-# Append shell to command
-CREATE_CMD+=" -s $SHELL"
-
-# 5. for loop: Create multiple groups
-read -p "Enter groups to create (space-separated): " -a GROUPS
-
-for group in "${GROUPS[@]}"
-do
-  if grep -q "^$group:" /etc/group; then
-    echo "Group '$group' already exists."
+# Group creation/addition with validation
+read -p "Do you want to add the user to an existing group? (yes/no): " grp_choice
+if [[ "$grp_choice" == "yes" ]]; then
+  read -p "Enter existing group name: " GROUP
+  if grep -q "^$GROUP:" /etc/group; then
+    echo "Using existing group '$GROUP'."
   else
-    groupadd "$group"
-    echo "Group '$group' created."
+    echo "Group '$GROUP' does not exist. Exiting."
+    exit 1
   fi
-done
-
-# Join groups for user creation
-GROUP_LIST=$(IFS=, ; echo "${GROUPS[*]}")
-CREATE_CMD+=" -G $GROUP_LIST"
+elif [[ "$grp_choice" == "no" ]]; then
+  read -p "Enter new group name to create: " GROUP
+  if grep -q "^$GROUP:" /etc/group; then
+    echo "Group '$GROUP' already exists."
+  else
+    groupadd "$GROUP" && echo "Group '$GROUP' created."
+  fi
+else
+  echo "Invalid input. Expected 'yes' or 'no'. Exiting."
+  exit 1
+fi
 
 # Create the user
-echo "Creating user with command:"
-echo "$CREATE_CMD"
-eval "$CREATE_CMD"
+useradd -m $HOME_FLAG -s "$SHELL" -G "$GROUP" "$USERNAME"
 
-# Final check using /etc/passwd instead of id
+# Final status
 if grep -q "^$USERNAME:" /etc/passwd; then
-  echo "User '$USERNAME' successfully created with groups: $GROUP_LIST and shell: $SHELL"
+  echo "User '$USERNAME' created successfully with shell '$SHELL' and group '$GROUP'."
 else
   echo "Failed to create user."
 fi
